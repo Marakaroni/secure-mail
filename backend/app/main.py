@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="secure-mail")
+app = FastAPI(title="Secure Mail", version="0.0.1")
+
 
 @app.get("/health")
 def health():
