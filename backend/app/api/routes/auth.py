@@ -11,6 +11,7 @@ from app.crud.users import get_by_email as get_user_by_email, get_by_username as
 from app.core.security import verify_password, create_access_token, decode_access_token
 from app.models.user import User
 
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 ISSUER = "secure-mail"
