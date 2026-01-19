@@ -5,4 +5,5 @@ python-dotenv
 cryptography
 argon2-cffi
 pyotp
-sqlalchemy
+SQLAlchemy==2.0.*
+
