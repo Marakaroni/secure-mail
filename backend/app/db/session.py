@@ -1,11 +1,14 @@
 # backend/app/db/session.py
 from __future__ import annotations
-import os
+
 from typing import Generator
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/db.sqlite")
+from app.core.config import settings
+
+DATABASE_URL = settings.database_url
 
 engine = create_engine(
     DATABASE_URL,
@@ -17,6 +20,7 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine,
 )
+
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
