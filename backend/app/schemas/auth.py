@@ -12,5 +12,6 @@ class LoginIn(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 class TokenOut(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+    requires_2fa: bool
+    access_token: str | None = None
+    mfa_token: str | None = None
