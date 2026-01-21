@@ -15,12 +15,20 @@ from app.crud.users import (
 from app.core.security import verify_password, create_access_token, decode_access_token
 from app.models.user import User
 from app.security.twofa import generate_secret, build_totp_uri, verify_totp
+from app.security.rate_limit import is_rate_limited, record_auth_attempt, get_rate_limit_delay
+from app.security.password_strength import validate_password_strength
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterIn, db: Session = Depends(get_db)):
+    # Validate password strength
+    is_valid, error_msg = validate_password_strength(payload.password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Check if user already exists (don't reveal which field)
     if get_user_by_email(db, payload.email) or get_user_by_username(db, payload.username):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
@@ -30,9 +38,21 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenOut)
 def login(payload: LoginIn, db: Session = Depends(get_db)):
+    # Rate limiting: check if this email is rate limited
+    if is_rate_limited(payload.email):
+        delay = get_rate_limit_delay(payload.email)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many login attempts. Try again in {int(delay)} seconds."
+        )
+    
     u = get_user_by_email(db, payload.email)
     if not u or not verify_password(payload.password, u.password_hash):
-        raise HTTPException(status_code=400, detail="Invalid credentials")
+        record_auth_attempt(payload.email, success=False)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Successful password authentication
+    record_auth_attempt(payload.email, success=True)
 
     if getattr(u, "two_fa_enabled", False):
         mfa_token = create_access_token(subject=str(u.id), extra={"mfa_pending": True})
@@ -75,8 +95,18 @@ def twofa_enable(
     password: str = Body(...),
     db: Session = Depends(get_db),
 ):
+    # Rate limiting
+    rate_limit_key = f"2fa_enable_{email}"
+    if is_rate_limited(rate_limit_key):
+        delay = get_rate_limit_delay(rate_limit_key)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many attempts. Try again in {int(delay)} seconds."
+        )
+
     u = get_user_by_email(db, email)
     if not u or not verify_password(password, u.password_hash):
+        record_auth_attempt(rate_limit_key, success=False)
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
     if getattr(u, "two_fa_enabled", False):
@@ -86,7 +116,11 @@ def twofa_enable(
         raise HTTPException(status_code=400, detail="2FA not initialised")
 
     if not verify_totp(u.two_fa_secret, payload.code):
+        record_auth_attempt(rate_limit_key, success=False)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Successful 2FA setup
+    record_auth_attempt(rate_limit_key, success=True)
 
     u.two_fa_enabled = True
     db.add(u)
@@ -96,20 +130,34 @@ def twofa_enable(
 
 @router.post("/2fa/verify", response_model=TokenOut)
 def twofa_verify(payload: TwoFAVerifyRequest, db: Session = Depends(get_db)):
+    # Decode mfa_token to get user_id
     data = decode_access_token(payload.mfa_token)
     if not data or not data.get("mfa_pending"):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     user_id = data.get("sub")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     u = db.get(User, int(user_id))
     if not u or not u.two_fa_enabled or u.two_fa_method != "TOTP" or not u.two_fa_secret:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # Rate limit 2FA verification attempts
+    rate_limit_key = f"2fa_{u.id}"
+    if is_rate_limited(rate_limit_key):
+        delay = get_rate_limit_delay(rate_limit_key)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many 2FA attempts. Try again in {int(delay)} seconds."
+        )
 
     if not verify_totp(u.two_fa_secret, payload.code):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        record_auth_attempt(rate_limit_key, success=False)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # Successful 2FA verification
+    record_auth_attempt(rate_limit_key, success=True)
 
     access_token = create_access_token(subject=str(u.id), extra={"mfa": True})
     return TokenOut(requires_2fa=False, access_token=access_token)

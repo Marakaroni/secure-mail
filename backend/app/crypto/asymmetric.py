@@ -15,8 +15,14 @@ def load_private_key(pem: bytes, password: bytes | None = None):
 
 def wrap_key_for_recipient(*, recipient_public_key_pem: bytes, msg_key: bytes) -> bytes:
     """
-    Hybrid crypto: we encrypt (wrap) the session key K_msg for a given recipient.
-    For Stage 5 we use RSA-OAEP(SHA-256). (Recipient must have RSA public key.)
+    Hybrid encryption: wrap the session key K_msg for a given recipient using RSA-OAEP.
+    
+    Args:
+        recipient_public_key_pem: Recipient's RSA-4096 public key (PEM encoded)
+        msg_key: Session key to wrap (32 bytes for AES-256)
+    
+    Returns:
+        Encrypted session key (RSA-4096 ciphertext)
     """
     pub = load_public_key(recipient_public_key_pem)
     if not isinstance(pub, rsa.RSAPublicKey):
@@ -34,6 +40,17 @@ def wrap_key_for_recipient(*, recipient_public_key_pem: bytes, msg_key: bytes) -
 
 
 def unwrap_key_for_recipient(*, recipient_private_key_pem: bytes, wrapped_key: bytes, password: bytes | None = None) -> bytes:
+    """
+    Hybrid decryption: unwrap the session key K_msg using recipient's RSA private key.
+    
+    Args:
+        recipient_private_key_pem: Recipient's RSA-4096 private key (PEM encoded)
+        wrapped_key: Encrypted session key (RSA-4096 ciphertext)
+        password: Optional password for encrypted private key
+    
+    Returns:
+        Decrypted session key (32 bytes for AES-256)
+    """
     priv = load_private_key(recipient_private_key_pem, password=password)
     if not isinstance(priv, rsa.RSAPrivateKey):
         raise ValueError('Recipient private key must be RSA for OAEP unwrapping')
