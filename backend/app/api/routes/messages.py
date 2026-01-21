@@ -12,11 +12,12 @@ from app.models.message_recipient import MessageRecipient
 
 from app.schemas.message import MessageSendRequest, MessageSendResponse
 
-from app.core.security import get_current_user, decrypt_user_private_key
+from app.core.security import get_current_user
 
 from app.crypto.symmetric import generate_msg_key, aead_encrypt
 from app.crypto.asymmetric import wrap_key_for_recipient
 from app.crypto.signatures import sign_ed25519_raw
+from app.security.session_keys import get_session_private_sign_key
 
 
 router = APIRouter(prefix='/messages', tags=['messages'])
@@ -86,30 +87,13 @@ def send_message(
     # 4) Create signature over (nonce + ciphertext + aad)
     payload_to_sign = nonce + ciphertext + aad
 
-    # Get sender's Ed25519 private key (decrypt it using their password)
-    # NOTE: In Etap 5, we don't have password here - it's available only at registration/login
-    # For now, we'll use a placeholder approach: store raw key temporarily or prompt for password
-    # ACTUAL SOLUTION: Private key should be decrypted during login and stored in session
-    # TODO for Etap 6+: Implement session-based key storage
+    # Get sender's Ed25519 private key from session cache
+    sender_sign_sk_raw = get_session_private_sign_key(current_user.id)
     
-    if not current_user.encrypted_private_sign_key or not current_user.key_salt or not current_user.key_kdf_params:
+    if not sender_sign_sk_raw:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Sender signing key missing'
-        )
-
-    # For now: assume user provided password in request (TODO: move to session)
-    # This is a temporary workaround - in production, decrypt during login
-    # For Etap 5 demo, we'll use a simplified approach
-    try:
-        # Try to decrypt private key (would need password - not available here in middleware)
-        # TEMPORARY: Store raw private key in memory during dev (NOT PRODUCTION SAFE)
-        # TODO: Fix for Etap 6 - use session-based key material
-        sender_sign_sk_raw: bytes = current_user.encrypted_private_sign_key
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to decrypt signing key'
+            detail='Sender signing key not available in session'
         )
     
     signature = sign_ed25519_raw(sender_sign_sk_raw, payload_to_sign)

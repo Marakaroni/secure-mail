@@ -12,11 +12,17 @@ from app.crud.users import (
     get_by_username as get_user_by_username,
     create_user,
 )
-from app.core.security import verify_password, create_access_token, decode_access_token
+from app.core.security import (
+    verify_password,
+    create_access_token,
+    decode_access_token,
+    decrypt_user_private_key,
+)
 from app.models.user import User
 from app.security.twofa import generate_secret, build_totp_uri, verify_totp
 from app.security.rate_limit import is_rate_limited, record_auth_attempt, get_rate_limit_delay
 from app.security.password_strength import validate_password_strength
+from app.security.session_keys import store_session_keys
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -53,6 +59,37 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
 
     # Successful password authentication
     record_auth_attempt(payload.email, success=True)
+
+    # Decrypt and store private keys in session
+    # (only if 2FA is enabled or user has keys)
+    if (
+        u.encrypted_private_sign_key
+        and u.encrypted_private_enc_key
+        and u.key_salt
+        and u.key_kdf_params
+    ):
+        try:
+            aad = u.email.encode("utf-8")
+            private_sign_key = decrypt_user_private_key(
+                encrypted_key=u.encrypted_private_sign_key,
+                password=payload.password,
+                salt=u.key_salt,
+                kdf_params_json=u.key_kdf_params,
+                aad=aad,
+            )
+            private_enc_key = decrypt_user_private_key(
+                encrypted_key=u.encrypted_private_enc_key,
+                password=payload.password,
+                salt=u.key_salt,
+                kdf_params_json=u.key_kdf_params,
+                aad=aad,
+            )
+            # Store in session cache
+            store_session_keys(u.id, private_sign_key, private_enc_key)
+        except Exception as e:
+            # Log error but don't fail login
+            # (keys can be decrypted on-demand if needed)
+            pass
 
     if getattr(u, "two_fa_enabled", False):
         mfa_token = create_access_token(subject=str(u.id), extra={"mfa_pending": True})
