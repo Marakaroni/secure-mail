@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 
 
 class MessageSendRequest(BaseModel):
@@ -35,3 +36,40 @@ class MessageSendResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     message_id: int
+
+
+class MessageListItem(BaseModel):
+    """Item in inbox/sent list"""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: int
+    sender_id: Optional[int] = None
+    created_at: datetime
+    is_read: bool
+    is_deleted: bool
+    # Metadata - safe to expose (not encrypted)
+    subject: str
+
+
+class MessageReceiveResponse(BaseModel):
+    """
+    Stage 6: Decrypted message for recipient.
+    Contains plaintext body + metadata.
+    """
+    model_config = ConfigDict(extra='forbid')
+    
+    id: int
+    sender_username: Optional[str] = None
+    sender_email: Optional[str] = None
+    subject: str
+    body: str
+    created_at: datetime
+    is_read: bool
+    is_deleted: bool
+    signature_valid: bool  # Whether sender's signature verified
+
+
+class MessageUpdateResponse(BaseModel):
+    """Response for read/delete operations"""
+    model_config = ConfigDict(extra='forbid')
+    status: str
