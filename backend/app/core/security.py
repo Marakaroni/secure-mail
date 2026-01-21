@@ -7,7 +7,8 @@ from argon2.exceptions import VerifyMismatchError
 from jose import jwt, JWTError
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer
+from starlette.requests import Request
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -68,18 +69,27 @@ _security = HTTPBearer()
 
 
 async def get_current_user(
-    credentials: HTTPAuthCredentials = Depends(_security),
+    request: Request,
     db: Session = Depends(get_db),
-):
+) -> "User":
     """
-    Dependency: Extract JWT token, verify it, and fetch User object from DB.
+    Dependency: Extract JWT token from Authorization header, verify it, and fetch User.
     Expects: Authorization: Bearer <token>
     Returns: User object
     Raises: HTTPException 401 if token invalid/expired/user not found
     """
     from app.models.user import User  # avoid circular imports
     
-    token = credentials.credentials
+    # Get authorization header
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    token = auth_header[7:]  # Remove "Bearer " prefix
     payload = decode_access_token(token)
     
     if not payload or not payload.get("sub"):
