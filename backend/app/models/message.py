@@ -1,6 +1,6 @@
 # backend/app/models/message.py
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, LargeBinary, Text
+from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -11,6 +11,9 @@ class Message(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+
+    # Subject: plaintext, unencrypted metadata (not sensitive)
+    subject: Mapped[str] = mapped_column(String(255), default="", nullable=False, index=True)
 
     # Message encryption: ciphertext includes encrypted body + attachments together
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

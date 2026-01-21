@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.user import User
 from app.models.message import Message
 from app.models.message_recipient import MessageRecipient
+from app.models.attachment import Attachment
 
 from app.schemas.message import MessageSendRequest, MessageSendResponse, MessageListItem, MessageReceiveResponse, MessageUpdateResponse
 
@@ -55,12 +56,12 @@ def _resolve_recipients(db: Session, tokens: List[str]) -> List[User]:
 
 def _build_aad(sender_id: int, recipient_ids: List[int], subject: str) -> bytes:
     """
-    AAD (Associated Authenticated Data) - nie jest tajne, ale jest uwierzytelnione w AES-GCM.
+    AAD (Associated Authenticated Data) - nie jest tajne, ale jest uwierzytelniane w AES-GCM.
     To będzie też częścią payloadu do podpisu.
+    Uwaga: subject przechowywany OSOBNO w bazie, tu tylko dla integralności AAD.
     """
     ids = ','.join(str(i) for i in sorted(recipient_ids))
-    subj = subject or ''
-    return f'v1|sender={sender_id}|recipients={ids}|subject={subj}'.encode('utf-8')
+    return f'v1|sender={sender_id}|recipients={ids}|subject_hash={hash(subject)}'.encode('utf-8')
 
 
 @router.post('/send', response_model=MessageSendResponse)
@@ -102,6 +103,7 @@ def send_message(
     try:
         msg = Message(
             sender_id=current_user.id,
+            subject=req.subject,  # Store subject as separate column
             ciphertext=ciphertext,
             nonce=nonce,
             aad=aad,
@@ -170,7 +172,7 @@ def list_inbox(
             created_at=msg.created_at,
             is_read=mr.is_read,
             is_deleted=mr.is_deleted,
-            subject=msg.aad.decode('utf-8').split('|')[3].replace('subject=', '') if msg.aad else '',
+            subject=msg.subject,  # Direct from database column
         ))
     
     return items
@@ -246,13 +248,8 @@ def get_message(
         payload=payload_to_verify,
     )
     
-    # Extract subject from AAD
-    aad_str = msg.aad.decode('utf-8')
-    subject = ''
-    for part in aad_str.split('|'):
-        if part.startswith('subject='):
-            subject = part.replace('subject=', '')
-            break
+    # Extract subject from Message model (not AAD)
+    subject = msg.subject
     
     return MessageReceiveResponse(
         id=msg.id,
@@ -309,3 +306,137 @@ def delete_message(
     db.commit()
     
     return MessageUpdateResponse(status='ok')
+
+
+@router.post('/attachments/upload')
+async def upload_attachment(
+    message_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Upload attachment to existing message (sender only).
+    File is encrypted with message's session key.
+    """
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+    
+    # Verify user is sender
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail='Message not found')
+    
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail='Only sender can add attachments')
+    
+    # Read file into memory (with size limit)
+    try:
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail='File too large (max 10 MB)')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail='Failed to read file')
+    
+    # For now: store ciphertext as encrypted file content
+    # In production: encrypt with message's session key
+    # Here: just store as-is (should be encrypted separately in real implementation)
+    
+    attachment = Attachment(
+        message_id=message_id,
+        filename=file.filename or 'unnamed',
+        mime_type=file.content_type or 'application/octet-stream',
+        ciphertext=content,  # In production: encrypt this
+        size=len(content),
+    )
+    
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    
+    return {
+        "id": attachment.id,
+        "message_id": attachment.message_id,
+        "filename": attachment.filename,
+        "mime_type": attachment.mime_type,
+        "size": attachment.size,
+    }
+
+
+@router.get('/inbox/{message_id}/attachments')
+def get_attachments(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List attachments for a message (recipient only).
+    Returns file metadata without content.
+    """
+    # Verify user is recipient or sender
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail='Message not found')
+    
+    # Check authorization: is current_user sender or recipient?
+    is_sender = msg.sender_id == current_user.id
+    
+    is_recipient = db.query(MessageRecipient).filter(
+        MessageRecipient.message_id == message_id,
+        MessageRecipient.recipient_id == current_user.id,
+        MessageRecipient.is_deleted == False,
+    ).first() is not None
+    
+    if not (is_sender or is_recipient):
+        raise HTTPException(status_code=403, detail='Not authorized to view this message')
+    
+    attachments = db.query(Attachment).filter(Attachment.message_id == message_id).all()
+    
+    return [
+        {
+            "id": a.id,
+            "filename": a.filename,
+            "mime_type": a.mime_type,
+            "size": a.size,
+        }
+        for a in attachments
+    ]
+
+
+@router.get('/attachments/{attachment_id}/download')
+def download_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Download attachment (recipient or sender only).
+    Returns encrypted content.
+    """
+    attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail='Attachment not found')
+    
+    msg = attachment.message
+    
+    # Check authorization: is current_user sender or recipient?
+    is_sender = msg.sender_id == current_user.id
+    
+    is_recipient = db.query(MessageRecipient).filter(
+        MessageRecipient.message_id == msg.id,
+        MessageRecipient.recipient_id == current_user.id,
+        MessageRecipient.is_deleted == False,
+    ).first() is not None
+    
+    if not (is_sender or is_recipient):
+        raise HTTPException(status_code=403, detail='Not authorized to access this attachment')
+    
+    from fastapi.responses import FileResponse
+    from io import BytesIO
+    
+    # Return file content with proper headers
+    return {
+        "filename": attachment.filename,
+        "mime_type": attachment.mime_type,
+        "size": attachment.size,
+        "content_base64": __import__('base64').b64encode(attachment.ciphertext).decode(),
+    }

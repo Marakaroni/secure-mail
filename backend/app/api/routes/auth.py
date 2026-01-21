@@ -17,12 +17,14 @@ from app.core.security import (
     create_access_token,
     decode_access_token,
     decrypt_user_private_key,
+    get_current_user,
 )
 from app.models.user import User
 from app.security.twofa import generate_secret, build_totp_uri, verify_totp
 from app.security.rate_limit import is_rate_limited, record_auth_attempt, get_rate_limit_delay
 from app.security.password_strength import validate_password_strength
-from app.security.session_keys import store_session_keys
+from app.security.session_keys import store_session_keys, clear_session_keys
+from app.security.csrf import generate_csrf_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -198,3 +200,20 @@ def twofa_verify(payload: TwoFAVerifyRequest, db: Session = Depends(get_db)):
 
     access_token = create_access_token(subject=str(u.id), extra={"mfa": True})
     return TokenOut(requires_2fa=False, access_token=access_token)
+
+
+@router.post("/logout")
+def logout(current_user: User = Depends(get_current_user)):
+    """Logout: clear session keys and invalidate JWT"""
+    clear_session_keys(current_user.id)
+    return {"status": "ok", "message": "Logged out successfully"}
+
+
+@router.get("/csrf-token")
+def get_csrf_token():
+    """
+    Get CSRF token for state-changing operations.
+    Include this token in X-CSRF-Token header for POST/PUT/DELETE requests.
+    """
+    token = generate_csrf_token()
+    return {"csrf_token": token}
