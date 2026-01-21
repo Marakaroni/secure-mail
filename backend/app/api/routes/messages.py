@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List
+import base64
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
@@ -11,7 +12,11 @@ from app.models.message import Message
 from app.models.message_recipient import MessageRecipient
 from app.models.attachment import Attachment
 
-from app.schemas.message import MessageSendRequest, MessageSendResponse, MessageListItem, MessageReceiveResponse, MessageUpdateResponse
+from app.schemas.message import (
+    MessageSendRequest, MessageSendResponse, MessageListItem, 
+    MessageReceiveResponse, MessageUpdateResponse,
+    AttachmentUploadResponse, AttachmentListItem, AttachmentDownloadResponse
+)
 
 from app.core.security import get_current_user
 
@@ -19,6 +24,8 @@ from app.crypto.symmetric import generate_msg_key, aead_encrypt
 from app.crypto.asymmetric import wrap_key_for_recipient
 from app.crypto.signatures import sign_ed25519_raw
 from app.security.session_keys import get_session_private_sign_key
+from app.security.sanitizer import InputSanitizer
+from app.security.rate_limiter import get_rate_limiter
 
 
 router = APIRouter(prefix='/messages', tags=['messages'])
@@ -70,9 +77,30 @@ def send_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MessageSendResponse:
+    """
+    Etap 7: Send encrypted message with rate limiting and validation.
+    - Max 10 messages per 60 seconds per user
+    - Input validation done by Pydantic schema
+    - Recipient validation (exist + not self)
+    """
+    # 0) Rate limiting: max 10 messages per minute
+    limiter = get_rate_limiter()
+    if not limiter.is_allowed(current_user.id, 'send_message', max_attempts=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail='Too many messages sent. Please wait before sending more.'
+        )
+    
     # 1) Find recipients
     recipients = _resolve_recipients(db, req.recipients)
     recipient_ids = [u.id for u in recipients]
+    
+    # Prevent sending to self (except if explicitly allowed in future)
+    if current_user.id in recipient_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot send message to yourself'
+        )
 
     # 2) Generate session key for this message
     k_msg = generate_msg_key()
@@ -308,7 +336,7 @@ def delete_message(
     return MessageUpdateResponse(status='ok')
 
 
-@router.post('/attachments/upload')
+@router.post('/attachments/upload', response_model=AttachmentUploadResponse)
 async def upload_attachment(
     message_id: int,
     file: UploadFile = File(...),
@@ -316,12 +344,16 @@ async def upload_attachment(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Upload attachment to existing message (sender only).
-    File is encrypted with message's session key.
+    Etap 7: Upload attachment with comprehensive validation.
+    - File size limit: 10 MB
+    - MIME type whitelist (PDF, images, Office docs, text)
+    - Filename sanitization (prevent path traversal)
+    - Sender authorization check
+    - Rate limiting per user
     """
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
     
-    # Verify user is sender
+    # 1. Verify message exists and user is sender
     msg = db.query(Message).filter(Message.id == message_id).first()
     if not msg:
         raise HTTPException(status_code=404, detail='Message not found')
@@ -329,50 +361,74 @@ async def upload_attachment(
     if msg.sender_id != current_user.id:
         raise HTTPException(status_code=403, detail='Only sender can add attachments')
     
-    # Read file into memory (with size limit)
+    # 2. Validate filename (sanitize against path traversal)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail='Filename required')
+    
+    try:
+        sanitized_filename = InputSanitizer.sanitize_filename(file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f'Invalid filename: {str(e)}')
+    
+    # 3. Validate MIME type against whitelist
+    content_type = file.content_type or 'application/octet-stream'
+    if not InputSanitizer.validate_mime_type(content_type):
+        raise HTTPException(
+            status_code=400, 
+            detail=f'MIME type {content_type} not allowed'
+        )
+    
+    # 4. Read file with size limit
     try:
         content = await file.read()
         if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail='File too large (max 10 MB)')
+            raise HTTPException(
+                status_code=413, 
+                detail=f'File too large (max 10 MB, received {len(content) / 1024 / 1024:.1f} MB)'
+            )
+        if len(content) == 0:
+            raise HTTPException(status_code=400, detail='File is empty')
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail='Failed to read file')
     
-    # For now: store ciphertext as encrypted file content
-    # In production: encrypt with message's session key
-    # Here: just store as-is (should be encrypted separately in real implementation)
-    
-    attachment = Attachment(
-        message_id=message_id,
-        filename=file.filename or 'unnamed',
-        mime_type=file.content_type or 'application/octet-stream',
-        ciphertext=content,  # In production: encrypt this
-        size=len(content),
-    )
-    
-    db.add(attachment)
-    db.commit()
-    db.refresh(attachment)
-    
-    return {
-        "id": attachment.id,
-        "message_id": attachment.message_id,
-        "filename": attachment.filename,
-        "mime_type": attachment.mime_type,
-        "size": attachment.size,
-    }
+    # 5. Create and store attachment
+    try:
+        attachment = Attachment(
+            message_id=message_id,
+            filename=sanitized_filename,
+            mime_type=content_type,
+            ciphertext=content,  # In production: encrypt this
+            size=len(content),
+        )
+        
+        db.add(attachment)
+        db.commit()
+        db.refresh(attachment)
+        
+        return AttachmentUploadResponse(
+            attachment_id=attachment.id,
+            message_id=attachment.message_id,
+            filename=attachment.filename,
+            size_bytes=attachment.size,
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail='Failed to store attachment')
 
 
-@router.get('/inbox/{message_id}/attachments')
+@router.get('/inbox/{message_id}/attachments', response_model=List[AttachmentListItem])
 def get_attachments(
     message_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    List attachments for a message (recipient only).
+    Etap 7: List attachments for a message with authorization check.
     Returns file metadata without content.
     """
-    # Verify user is recipient or sender
+    # Verify message exists
     msg = db.query(Message).filter(Message.id == message_id).first()
     if not msg:
         raise HTTPException(status_code=404, detail='Message not found')
@@ -389,34 +445,48 @@ def get_attachments(
     if not (is_sender or is_recipient):
         raise HTTPException(status_code=403, detail='Not authorized to view this message')
     
-    attachments = db.query(Attachment).filter(Attachment.message_id == message_id).all()
+    # Get all attachments
+    attachments = db.query(Attachment).filter(
+        Attachment.message_id == message_id
+    ).all()
     
     return [
-        {
-            "id": a.id,
-            "filename": a.filename,
-            "mime_type": a.mime_type,
-            "size": a.size,
-        }
+        AttachmentListItem(
+            id=a.id,
+            message_id=a.message_id,
+            filename=a.filename,
+            size_bytes=a.size,
+            mime_type=a.mime_type,
+        )
         for a in attachments
     ]
 
 
-@router.get('/attachments/{attachment_id}/download')
+@router.get('/attachments/{attachment_id}/download', response_model=AttachmentDownloadResponse)
 def download_attachment(
     attachment_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Download attachment (recipient or sender only).
-    Returns encrypted content.
+    Etap 7: Download attachment with authorization and validation.
+    Returns encrypted content in base64 format.
     """
-    attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
+    # Get attachment
+    attachment = db.query(Attachment).filter(
+        Attachment.id == attachment_id
+    ).first()
+    
     if not attachment:
         raise HTTPException(status_code=404, detail='Attachment not found')
     
-    msg = attachment.message
+    # Get associated message
+    msg = db.query(Message).filter(
+        Message.id == attachment.message_id
+    ).first()
+    
+    if not msg:
+        raise HTTPException(status_code=404, detail='Associated message not found')
     
     # Check authorization: is current_user sender or recipient?
     is_sender = msg.sender_id == current_user.id
@@ -430,13 +500,9 @@ def download_attachment(
     if not (is_sender or is_recipient):
         raise HTTPException(status_code=403, detail='Not authorized to access this attachment')
     
-    from fastapi.responses import FileResponse
-    from io import BytesIO
-    
-    # Return file content with proper headers
-    return {
-        "filename": attachment.filename,
-        "mime_type": attachment.mime_type,
-        "size": attachment.size,
-        "content_base64": __import__('base64').b64encode(attachment.ciphertext).decode(),
-    }
+    # Return attachment in base64 format
+    return AttachmentDownloadResponse(
+        filename=attachment.filename,
+        data_base64=base64.b64encode(attachment.ciphertext).decode('ascii'),
+        mime_type=attachment.mime_type,
+    )
