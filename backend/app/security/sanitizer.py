@@ -78,6 +78,9 @@ class InputSanitizer:
     @staticmethod
     def sanitize_username(value: str) -> str:
         """Validate username format (alphanumeric + underscore/dash)."""
+        if len(value) < 3:
+            raise ValueError("Username must be at least 3 characters")
+        
         sanitized = InputSanitizer.sanitize_string(value, max_length=64)
         
         # Username: alphanumeric, dash, underscore only
@@ -109,9 +112,16 @@ class InputSanitizer:
         if '..' in filename:
             raise ValueError("Path traversal not allowed")
         
-        # Allow alphanumeric, dot, dash, underscore
-        if not re.match(r'^[a-zA-Z0-9._\-]+$', filename):
-            raise ValueError("Filename contains invalid characters")
+        # Allow alphanumeric, dot, dash, underscore, space, parentheses
+        # Replace other characters with nothing instead of rejecting
+        filename = re.sub(r'[^a-zA-Z0-9._\-() ]', '', filename)
+        
+        # Remove multiple consecutive spaces/dots
+        filename = re.sub(r'[ ]{2,}', ' ', filename)
+        filename = re.sub(r'[.]{2,}', '.', filename)
+        
+        if not filename:
+            raise ValueError("Filename becomes empty after sanitization")
         
         return filename
 
