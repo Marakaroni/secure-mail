@@ -113,12 +113,10 @@
 
     <script src="api.js"></script>
     <script>
-        // Initialize API and CSRF token
         (async () => {
             const api = new SecureMailAPI();
             await api.initCSRF();
 
-            // If already logged in, redirect to inbox
             if (api.isLoggedIn()) {
                 window.location.href = 'inbox.html';
             }

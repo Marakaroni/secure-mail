@@ -1,4 +1,3 @@
-// api.js - Common API Module
 const API_BASE = 'https://localhost';
 
 class SecureMailAPI {
@@ -8,7 +7,6 @@ class SecureMailAPI {
         this.mfaToken = localStorage.getItem('mfa_token');
     }
 
-    // Initialize CSRF token at startup
     async initCSRF() {
         try {
             const response = await fetch(`${API_BASE}/auth/csrf-token`);
@@ -22,7 +20,6 @@ class SecureMailAPI {
         }
     }
 
-    // Helper for API requests
     async request(method, endpoint, data = null) {
         const url = `${API_BASE}${endpoint}`;
         const options = {
@@ -32,12 +29,10 @@ class SecureMailAPI {
             },
         };
 
-        // Add auth token if available
         if (this.token) {
             options.headers['Authorization'] = `Bearer ${this.token}`;
         }
 
-        // Add CSRF token for state-changing operations
         if (this.csrfToken && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
             options.headers['X-CSRF-Token'] = this.csrfToken;
         }
@@ -60,7 +55,6 @@ class SecureMailAPI {
             throw new Error(responseData.detail || `HTTP ${response.status}`);
         }
 
-        // Store CSRF token from response if available
         if (responseData.csrf_token) {
             this.csrfToken = responseData.csrf_token;
             localStorage.setItem('csrf_token', this.csrfToken);
@@ -69,7 +63,6 @@ class SecureMailAPI {
         return responseData;
     }
 
-    // Auth endpoints
     async register(username, email, password) {
         return this.request('POST', '/auth/register', { username, email, password });
     }
@@ -128,7 +121,6 @@ class SecureMailAPI {
         }
     }
 
-    // Message endpoints
     async getInbox() {
         return this.request('GET', '/messages/inbox');
     }
@@ -138,7 +130,6 @@ class SecureMailAPI {
     }
 
     async sendMessage(toUsername, subject, body) {
-        // Backend expects recipients as list of usernames/emails
         return this.request('POST', '/messages/send', {
             recipients: [toUsername],
             subject: subject,
@@ -147,7 +138,6 @@ class SecureMailAPI {
     }
 
     async uploadAttachment(messageId, file) {
-        // This endpoint requires special handling (FormData, not JSON)
         const url = `${API_BASE}/messages/attachments/upload?message_id=${messageId}`;
         const formData = new FormData();
         formData.append('file', file);
@@ -208,5 +198,4 @@ class SecureMailAPI {
     }
 }
 
-// Global API instance
 const api = new SecureMailAPI();

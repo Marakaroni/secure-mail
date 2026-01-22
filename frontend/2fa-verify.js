@@ -1,4 +1,3 @@
-// 2fa-verify.js
 document.getElementById('verify2FAForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -20,11 +19,9 @@ document.getElementById('verify2FAForm').addEventListener('submit', async (e) =>
 
         await api.verify2FA(mfaToken, totp);
 
-        // Clear session storage
         sessionStorage.removeItem('login_email');
         sessionStorage.removeItem('login_mfa_token');
 
-        // Redirect to inbox
         setTimeout(() => {
             window.location.href = 'inbox.html';
         }, 500);

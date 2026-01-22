@@ -1,4 +1,3 @@
-// 2fa-setup.js
 let setupData = null;
 
 async function initSetup() {
@@ -14,10 +13,8 @@ async function initSetup() {
     try {
         setupData = await api.setup2FA(email, password);
         
-        // Display secret
         document.getElementById('secretCode').textContent = setupData.secret;
 
-        // Generate QR code
         if (typeof QRCode !== 'undefined' && QRCode.toCanvas) {
             const canvas = document.getElementById('qrCode');
             await QRCode.toCanvas(canvas, setupData.provisioning_uri, {
@@ -55,7 +52,6 @@ document.getElementById('setup2FAForm').addEventListener('submit', async (e) => 
 
         await api.enable2FA(email, password, totp);
 
-        // Store credentials for login
         sessionStorage.removeItem('register_email');
         sessionStorage.removeItem('register_password');
 
@@ -71,5 +67,4 @@ document.getElementById('setup2FAForm').addEventListener('submit', async (e) => 
     }
 });
 
-// Initialize on page load
 window.addEventListener('load', initSetup);

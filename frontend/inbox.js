@@ -1,12 +1,9 @@
-// inbox.js
 let currentView = 'inbox';
 
-// Check if user is logged in
 if (!api.isLoggedIn()) {
     window.location.href = 'login.html';
 }
 
-// Navigation
 document.querySelectorAll('.sidebar-item').forEach(btn => {
     btn.addEventListener('click', (e) => {
         const page = e.target.dataset.page;
@@ -16,11 +13,9 @@ document.querySelectorAll('.sidebar-item').forEach(btn => {
             return;
         }
 
-        // Update active button
         document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
 
-        // Show view
         showView(page);
     });
 });
@@ -78,7 +73,6 @@ async function viewMessage(messageId) {
     try {
         const message = await api.getMessage(messageId);
         
-        // Mark as read
         if (!message.read) {
             await api.markAsRead(messageId);
         }
@@ -86,7 +80,6 @@ async function viewMessage(messageId) {
         const messageView = document.getElementById('messageView');
         const messageDetail = document.getElementById('messageDetail');
 
-        // Build attachments HTML
         let attachmentsHTML = '';
         if (message.attachments && message.attachments.length > 0) {
             attachmentsHTML = `
@@ -147,7 +140,6 @@ function backToInbox() {
 async function downloadAttachment(attachmentId, filename) {
     try {
         const response = await api.downloadAttachment(attachmentId);
-        // Create blob from base64
         const byteCharacters = atob(response.data_base64);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -155,8 +147,7 @@ async function downloadAttachment(attachmentId, filename) {
         }
         const byteArray = new Uint8Array(byteNumbers);
         const blob = new Blob([byteArray], { type: response.mime_type });
-        
-        // Create download link
+
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -170,7 +161,6 @@ async function downloadAttachment(attachmentId, filename) {
     }
 }
 
-// Attachments preview
 document.getElementById('attachments').addEventListener('change', (e) => {
     const files = e.target.files;
     const attachmentsList = document.getElementById('attachmentsList');
@@ -198,7 +188,6 @@ function removeAttachment(index) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// Recipients autocomplete
 let recipients = [];
 document.getElementById('toEmail').addEventListener('focus', async () => {
     if (recipients.length === 0) {
@@ -241,7 +230,6 @@ function selectRecipient(email) {
     document.getElementById('recipientsList').style.display = 'none';
 }
 
-// Compose form
 document.getElementById('composeForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -263,11 +251,9 @@ document.getElementById('composeForm').addEventListener('submit', async (e) => {
         btn.classList.add('loading');
         btn.disabled = true;
 
-        // 1. Send message first
         const messageResult = await api.sendMessage(toEmail, subject, body);
         const messageId = messageResult.message_id;
 
-        // 2. Upload attachments if any
         if (files.length > 0) {
             for (let file of files) {
                 try {
@@ -281,11 +267,9 @@ document.getElementById('composeForm').addEventListener('submit', async (e) => {
         successDiv.textContent = `✓ Wiadomość wysłana${files.length > 0 ? ` z ${files.length} załącznikami` : ''}!`;
         successDiv.classList.add('show');
 
-        // Reset form
         e.target.reset();
         document.getElementById('attachmentsList').innerHTML = '';
 
-        // Return to inbox after 2 seconds
         setTimeout(() => {
             showView('inbox');
         }, 2000);
@@ -305,14 +289,12 @@ async function logout() {
         window.location.href = 'login.html';
     } catch (error) {
         console.error('Logout error:', error);
-        // Force logout anyway
         localStorage.clear();
         sessionStorage.clear();
         window.location.href = 'login.html';
     }
 }
 
-// Initialize
 window.addEventListener('load', () => {
     loadUserInfo();
     showView('inbox');

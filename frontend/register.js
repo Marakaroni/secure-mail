@@ -1,4 +1,3 @@
-// register.js
 document.getElementById('registerForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -22,11 +21,9 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
         successDiv.textContent = '✓ Konto utworzone! Przechodzę do setup 2FA...';
         successDiv.classList.add('show');
 
-        // Store credentials for 2FA setup
         sessionStorage.setItem('register_email', email);
         sessionStorage.setItem('register_password', password);
 
-        // Redirect to 2FA setup after 2 seconds
         setTimeout(() => {
             window.location.href = '2fa-setup.html';
         }, 2000);

@@ -1,4 +1,3 @@
-// login.js
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -16,16 +15,13 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         const response = await api.login(email, password);
 
         if (response.requires_2fa) {
-            // Store email and mfa_token for 2FA verification
             sessionStorage.setItem('login_email', email);
             sessionStorage.setItem('login_mfa_token', response.mfa_token);
             
-            // Redirect to 2FA verification
             setTimeout(() => {
                 window.location.href = '2fa-verify.html';
             }, 500);
         } else {
-            // No 2FA, logged in successfully
             setTimeout(() => {
                 window.location.href = 'inbox.html';
             }, 500);

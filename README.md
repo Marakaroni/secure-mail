@@ -1,36 +1,106 @@
-# Secure Mail
+# 🔐 Bezpieczna Poczta
 
-## Cel projektu
-Aplikacja webowa umożliwiająca wymianę zaszyfrowanych wiadomości wraz z weryfikacją autentyczności (podpis cyfrowy nadawcy). System wspiera rejestrację, logowanie z 2FA (TOTP) oraz operacje na wiadomościach i załącznikach.
+Szyfrowana aplikacja e-mail z dwuetapową autentykacją (2FA), hybrydowym szyfrowaniem (RSA-4096 + AES-256-GCM) i podpisami cyfrowymi.
 
-## Zakres minimalny
-- rejestracja konta użytkownika
-- logowanie użytkownika
-- dwuetapowa autentykacja (TOTP)
-- wysyłanie zaszyfrowanej wiadomości do co najmniej jednego użytkownika wraz z załącznikami
-- podgląd wiadomości oraz pobieranie załączników
-- oznaczanie wiadomości jako odczytanej
-- usuwanie otrzymanej wiadomości
-- weryfikacja podpisu cyfrowego nadawcy
+### Wymagania
+- Docker & Docker Compose
+- HTTPS (certyfikat selbyt-podpisany)
+
+## Uruchomienie
+
+```bash
+cd secure-mail
+docker compose up --build
+```
 
 ## Architektura
-Client → HTTPS → NGINX (reverse proxy, TLS) → FastAPI (API) → SQLite (dane)
 
-Backend nie jest wystawiany bezpośrednio na świat (brak publikacji portu), dostęp odbywa się wyłącznie przez NGINX.
+```
+┌─────────────────┐
+│   Frontend      │ (Vue.js, HTML/CSS/JS)
+├─────────────────┤
+│   nginx         │ (Port 443 TLS, reverse proxy)
+├─────────────────┤
+│   FastAPI       │ (Backend, port 8000)
+├─────────────────┤
+│   SQLite DB     │ (db_data volume)
+└─────────────────┘
+```
+
+## Bezpieczeństwo
+
+- **Hasła:** Argon2id hashing (3 iteracje, 64 MiB RAM)
+- **Szyfrowanie wiadomości:** AES-256-GCM (32-byte key, 12-byte nonce)
+- **Hybrydowe klucze:** RSA-4096-OAEP dla każdego odbiorcy
+- **Podpisy:** Ed25519 dla autentyczności
+- **Sesja kluczy:** Envelope encryption + 5 min TTL
+- **CSRF:** Token-based protection
+- **Rate Limiting:** Ochrona przed brute force
+- **2FA:** TOTP (Time-based One-Time Password)
+
+## Struktura Projektu
+
+```
+secure-mail/
+├── backend/                 # Python FastAPI
+│   ├── app/
+│   │   ├── api/routes/      # /auth, /messages endpoints
+│   │   ├── models/          # User, Message, Attachment
+│   │   ├── crypto/          # AES, RSA, Ed25519, KDF
+│   │   ├── security/        # Session keys, CSRF, rate limit
+│   │   └── schemas/         # Request/response validators
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/                # Static HTML/CSS/JS
+│   ├── index.html           # Landing page
+│   ├── login.html           # Login form
+│   ├── register.html        # Registration form
+│   ├── 2fa-setup.html       # 2FA QR code setup
+│   ├── 2fa-verify.html      # 2FA code verification
+│   ├── inbox.html           # Mail inbox
+│   ├── api.js               # API client
+│   └── styles.css           # Global styles
+├── nginx/
+│   ├── nginx.conf           # Worker config
+│   └── conf.d/
+│       └── secure-mail.conf # TLS + reverse proxy
+└── docker-compose.yml       # Orchestration
+```
+
+## Certyfikat SSL
+
+Certyfikat selbyt-podpisany jest już wygenerowany w `nginx/certs/`.
+
+Aby wygenerować nowy:
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout nginx/certs/key.pem \
+  -out nginx/certs/cert.pem -days 365 -nodes
+```
+
+## Wymagania Hasła
+
+- Minimum 12 znaków
+- Co najmniej 1 wielka litera
+- Co najmniej 1 mała litera
+- Co najmniej 1 cyfra
+- Co najmniej 1 znak specjalny: !@#$%^&*()-_=+
+
+## Zatrzymanie
+
+```bash
+docker compose down
+```
+
+Aby usunąć bazę danych:
+```bash
+docker compose down -v
+```
 
 ## Technologie
-- Python + FastAPI
-- SQLite
-- Docker + Docker Compose
-- NGINX (TLS termination, reverse proxy)
-- cryptography (AEAD + podpisy)
-- argon2-cffi (Argon2id)
-- pyotp (TOTP)
 
-## Uruchomienie (Etap 0)
-1. Skopiuj konfigurację:
-   - `cp .env.example .env`
-2. Uruchom:
-   - `docker-compose up --build`
-3. Test:
-   - `GET https://localhost/health` (cert self-signed może wymagać zaakceptowania w przeglądarce)
+- **Backend:** Python 3.11, FastAPI, SQLAlchemy
+- **Kryptografia:** cryptography, libsodium
+- **Frontend:** HTML5, CSS3, Vanilla JavaScript
+- **Reverse Proxy:** nginx
+- **Orkiestracja:** Docker Compose
+- **Baza Danych:** SQLite
