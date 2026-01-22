@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 from app.security.sanitizer import InputSanitizer
 
 class RegisterIn(BaseModel):
-    """Registration request with comprehensive validation (Etap 7)."""
     model_config = ConfigDict(extra='forbid')
     
     username: str = Field(
@@ -24,25 +23,22 @@ class RegisterIn(BaseModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        """Sanitize username."""
         return InputSanitizer.sanitize_username(v)
     
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
-        """Validate password strength."""
         if not re.search(r'[A-Z]', v):
-            raise ValueError('Password must contain uppercase letter')
+            raise ValueError('Hasło musi zawierać wielką literę')
         if not re.search(r'[a-z]', v):
-            raise ValueError('Password must contain lowercase letter')
+            raise ValueError('Hasło musi zawierać małą literę')
         if not re.search(r'\d', v):
-            raise ValueError('Password must contain digit')
+            raise ValueError('Hasło musi zawierać cyfrę')
         if not re.search(r'[!@#$%^&*()\-_=+\[\]{};:\'\"<>,.?/]', v):
-            raise ValueError('Password must contain special character')
+            raise ValueError('Hasło musi zawierać znak specjalny')
         return v
 
 class LoginIn(BaseModel):
-    """Login request with input validation (Etap 7)."""
     model_config = ConfigDict(extra='forbid')
     
     email: EmailStr
@@ -51,13 +47,11 @@ class LoginIn(BaseModel):
     @field_validator('password')
     @classmethod
     def validate_password_not_empty(cls, v: str) -> str:
-        """Ensure password is not whitespace-only."""
         if not v.strip():
-            raise ValueError('Password cannot be empty')
+            raise ValueError('Hasło nie może być puste')
         return v
 
 class TokenOut(BaseModel):
-    """Auth response (no external input, safe)."""
     model_config = ConfigDict(extra='forbid')
     
     requires_2fa: bool

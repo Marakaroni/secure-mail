@@ -7,10 +7,6 @@ from app.security.sanitizer import InputSanitizer
 
 
 class MessageSendRequest(BaseModel):
-    """
-    Etap 7: Message send with comprehensive input validation.
-    Prevents injection, XSS, path traversal in attachments.
-    """
     model_config = ConfigDict(extra='forbid')
 
     recipients: List[str] = Field(
@@ -34,33 +30,28 @@ class MessageSendRequest(BaseModel):
     @field_validator('recipients')
     @classmethod
     def validate_recipients(cls, v: List[str]) -> List[str]:
-        """Validate and sanitize recipient list."""
         return InputSanitizer.validate_recipient_list(v, max_recipients=20)
     
     @field_validator('subject')
     @classmethod
     def validate_subject(cls, v: str) -> str:
-        """Sanitize subject."""
         return InputSanitizer.sanitize_subject(v)
     
     @field_validator('body')
     @classmethod
     def validate_body(cls, v: str) -> str:
-        """Sanitize body (allow newlines)."""
         if not v or not v.strip():
-            raise ValueError('Body cannot be empty')
+            raise ValueError('Zawartość wiadomości nie może być pusta')
         return InputSanitizer.sanitize_body(v)
 
 
 class MessageSendResponse(BaseModel):
-    """Response after sending message."""
     model_config = ConfigDict(extra='forbid')
 
     message_id: int
 
 
 class MessageListItem(BaseModel):
-    """Item in inbox/sent list with basic metadata."""
     model_config = ConfigDict(from_attributes=True)
     
     id: int
@@ -72,10 +63,6 @@ class MessageListItem(BaseModel):
 
 
 class MessageReceiveResponse(BaseModel):
-    """
-    Etap 6: Decrypted message for recipient.
-    Contains plaintext body + metadata + attachments.
-    """
     model_config = ConfigDict(extra='forbid')
     
     id: int
@@ -91,13 +78,11 @@ class MessageReceiveResponse(BaseModel):
 
 
 class MessageUpdateResponse(BaseModel):
-    """Response for read/delete operations."""
     model_config = ConfigDict(extra='forbid')
     status: str
 
 
 class AttachmentUploadResponse(BaseModel):
-    """Response after uploading attachment."""
     model_config = ConfigDict(extra='forbid')
     
     attachment_id: int
@@ -107,7 +92,6 @@ class AttachmentUploadResponse(BaseModel):
 
 
 class AttachmentListItem(BaseModel):
-    """Attachment metadata for listing."""
     model_config = ConfigDict(from_attributes=True)
     
     id: int
@@ -118,7 +102,6 @@ class AttachmentListItem(BaseModel):
 
 
 class AttachmentDownloadResponse(BaseModel):
-    """Response for attachment download."""
     model_config = ConfigDict(extra='forbid')
     
     filename: str

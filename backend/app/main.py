@@ -10,10 +10,8 @@ from app.middleware.csrf import CSRFMiddleware
 
 app = FastAPI(title="Secure Mail", version="0.0.1")
 
-# Initialize CSRF manager
 init_csrf_manager(settings.JWT_SECRET)
 
-# Add CSRF middleware
 app.add_middleware(CSRFMiddleware)
 
 app.include_router(auth_router)

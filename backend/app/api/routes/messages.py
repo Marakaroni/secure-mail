@@ -33,29 +33,21 @@ router = APIRouter(prefix='/messages', tags=['messages'])
 
 
 def _resolve_recipients(db: Session, tokens: List[str]) -> List[User]:
-    """
-    tokens: lista 'recipients' z requestu (u Ciebie stringi).
-    Wyszukujemy po email ALBO username (bo logowanie masz po emailu, a username wyświetlasz).
-    Case-insensitive matching.
-    """
     uniq = [t.strip().lower() for t in tokens if t and t.strip()]
     
     if not uniq:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid recipients')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Nieprawidłowi odbiorcy')
 
-    # email match (case-insensitive using func.lower)
     by_email = db.query(User).filter(
         func.lower(User.email).in_(uniq)
     ).all()
 
-    # username match (case-insensitive)
     by_username = []
     if hasattr(User, 'username'):
         by_username = db.query(User).filter(
             func.lower(User.username).in_(uniq)
         ).all()
 
-    # połącz, bez duplikatów
     found_map = {}
     for u in (by_email + by_username):
         found_map[u.id] = u
@@ -63,17 +55,12 @@ def _resolve_recipients(db: Session, tokens: List[str]) -> List[User]:
     recipients = list(found_map.values())
     
     if not recipients:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid recipients')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Nieprawidłowi odbiorcy')
 
     return recipients
 
 
 def _build_aad(sender_id: int, recipient_ids: List[int], subject: str) -> bytes:
-    """
-    AAD (Associated Authenticated Data) - nie jest tajne, ale jest uwierzytelniane w AES-GCM.
-    To będzie też częścią payloadu do podpisu.
-    Uwaga: subject przechowywany OSOBNO w bazie, tu tylko dla integralności AAD.
-    """
     ids = ','.join(str(i) for i in sorted(recipient_ids))
     return f'v1|sender={sender_id}|recipients={ids}|subject_hash={hash(subject)}'.encode('utf-8')
 
@@ -84,35 +71,24 @@ def send_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MessageSendResponse:
-    """
-    Etap 7: Send encrypted message with rate limiting and validation.
-    - Max 10 messages per 60 seconds per user
-    - Input validation done by Pydantic schema
-    - Recipient validation (exist + not self)
-    """
-    # 0) Rate limiting: max 10 messages per minute
     limiter = get_rate_limiter()
     if not limiter.is_allowed(current_user.id, 'send_message', max_attempts=10, window_seconds=60):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail='Too many messages sent. Please wait before sending more.'
+            detail='Za wiele wysłanych wiadomości. Poczekaj przed wysłaniem kolejnych.'
         )
     
-    # 1) Find recipients
     recipients = _resolve_recipients(db, req.recipients)
     recipient_ids = [u.id for u in recipients]
     
-    # Prevent sending to self (except if explicitly allowed in future)
     if current_user.id in recipient_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Cannot send message to yourself'
+            detail='Nie możesz wysłać wiadomości do siebie'
         )
 
-    # 2) Generate session key for this message
     k_msg = generate_msg_key()
 
-    # 3) Build AAD (Associated Authenticated Data) and encrypt message body
     aad = _build_aad(current_user.id, recipient_ids, req.subject)
     plaintext = req.body.encode('utf-8')
 
@@ -120,25 +96,22 @@ def send_message(
     nonce = enc.nonce
     ciphertext = enc.ciphertext
 
-    # 4) Create signature over (nonce + ciphertext + aad)
     payload_to_sign = nonce + ciphertext + aad
 
-    # Get sender's Ed25519 private key from session cache
     sender_sign_sk_raw = get_session_private_sign_key(current_user.id)
     
     if not sender_sign_sk_raw:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Sender signing key not available in session'
+            detail='Klucz podpisywania nadawcy nie jest dostępny w sesji'
         )
     
     signature = sign_ed25519_raw(sender_sign_sk_raw, payload_to_sign)
 
-    # 5) Save message and recipients in transaction
     try:
         msg = Message(
             sender_id=current_user.id,
-            subject=req.subject,  # Store subject as separate column
+            subject=req.subject,  
             ciphertext=ciphertext,
             nonce=nonce,
             aad=aad,
@@ -146,14 +119,13 @@ def send_message(
         )
 
         db.add(msg)
-        db.flush()  # Get msg.id
+        db.flush() 
 
         for r in recipients:
-            # Recipient's RSA public key (PEM encoded)
             if not r.public_enc_key:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail='Recipient encryption key missing'
+                    detail='Brakuje klucza szyfrowania odbiorcy'
                 )
 
             wrapped_k = wrap_key_for_recipient(
@@ -178,7 +150,7 @@ def send_message(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to send message'
+            detail='Nie udało się wysłać wiadomości'
         )
 
 
@@ -187,10 +159,8 @@ def list_inbox(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List received messages (inbox)"""
     from sqlalchemy import and_
     
-    # Get all message recipients for this user (where is_deleted=False)
     recipients = db.query(MessageRecipient).filter(
         and_(
             MessageRecipient.recipient_id == current_user.id,
@@ -207,7 +177,7 @@ def list_inbox(
             created_at=msg.created_at,
             is_read=mr.is_read,
             is_deleted=mr.is_deleted,
-            subject=msg.subject,  # Direct from database column
+            subject=msg.subject,  
         ))
     
     return items
@@ -219,36 +189,29 @@ def get_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Get decrypted message from inbox.
-    Verifies sender signature and decrypts content.
-    """
     from app.crypto.asymmetric import unwrap_key_for_recipient
     from app.crypto.symmetric import aead_decrypt
     from app.crypto.signatures import verify_ed25519_raw
     from app.security.session_keys import get_session_private_enc_key
     
-    # Find message recipient record
     mr = db.query(MessageRecipient).filter(
         MessageRecipient.message_id == message_id,
         MessageRecipient.recipient_id == current_user.id,
     ).first()
     
     if not mr or mr.is_deleted:
-        raise HTTPException(status_code=404, detail='Message not found')
+        raise HTTPException(status_code=404, detail='Wiadomość nie znaleziona')
     
     msg = mr.message
     sender = msg.sender
     
-    # Get recipient's private encryption key from session
     private_enc_key_pem = get_session_private_enc_key(current_user.id)
     if not private_enc_key_pem:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Private key not available (login again)'
+            detail='Klucz prywatny nie jest dostępny (zaloguj się ponownie)'
         )
     
-    # Decrypt session key
     try:
         k_msg = unwrap_key_for_recipient(
             recipient_private_key_pem=private_enc_key_pem,
@@ -257,10 +220,9 @@ def get_message(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to decrypt message key'
+            detail='Nie udało się odszyfrować klucza wiadomości'
         )
     
-    # Decrypt message content
     try:
         plaintext = aead_decrypt(
             key=k_msg,
@@ -272,10 +234,9 @@ def get_message(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to decrypt message'
+            detail='Nie udało się odszyfrować wiadomości'
         )
     
-    # Verify signature
     payload_to_verify = msg.nonce + msg.ciphertext + msg.aad
     signature_valid = verify_ed25519_raw(
         public_sign_key_raw=sender.public_sign_key,
@@ -283,10 +244,8 @@ def get_message(
         payload=payload_to_verify,
     )
     
-    # Extract subject from Message model (not AAD)
     subject = msg.subject
     
-    # Get attachments
     attachments = db.query(Attachment).filter(
         Attachment.message_id == msg.id
     ).all()
@@ -320,14 +279,13 @@ def mark_as_read(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Mark message as read"""
     mr = db.query(MessageRecipient).filter(
         MessageRecipient.message_id == message_id,
         MessageRecipient.recipient_id == current_user.id,
     ).first()
     
     if not mr:
-        raise HTTPException(status_code=404, detail='Message not found')
+        raise HTTPException(status_code=404, detail='Wiadomość nie znaleziona')
     
     mr.is_read = True
     db.add(mr)
@@ -342,14 +300,13 @@ def delete_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete message (mark as deleted for user)"""
     mr = db.query(MessageRecipient).filter(
         MessageRecipient.message_id == message_id,
         MessageRecipient.recipient_id == current_user.id,
     ).first()
     
     if not mr:
-        raise HTTPException(status_code=404, detail='Message not found')
+        raise HTTPException(status_code=404, detail='Wiadomość nie znaleziona')
     
     mr.is_deleted = True
     db.add(mr)
@@ -365,63 +322,50 @@ async def upload_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Etap 7: Upload attachment with comprehensive validation.
-    - File size limit: 10 MB
-    - MIME type whitelist (PDF, images, Office docs, text)
-    - Filename sanitization (prevent path traversal)
-    - Sender authorization check
-    - Rate limiting per user
-    """
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+    MAX_FILE_SIZE = 10 * 1024 * 1024 
     
-    # 1. Verify message exists and user is sender
     msg = db.query(Message).filter(Message.id == message_id).first()
     if not msg:
-        raise HTTPException(status_code=404, detail='Message not found')
+        raise HTTPException(status_code=404, detail='Wiadomość nie znaleziona')
     
     if msg.sender_id != current_user.id:
-        raise HTTPException(status_code=403, detail='Only sender can add attachments')
+        raise HTTPException(status_code=403, detail='Tylko nadawca może dodawać załączniki')
     
-    # 2. Validate filename (sanitize against path traversal)
     if not file.filename:
-        raise HTTPException(status_code=400, detail='Filename required')
+        raise HTTPException(status_code=400, detail='Wymagana nazwa pliku')
     
     try:
         sanitized_filename = InputSanitizer.sanitize_filename(file.filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f'Invalid filename: {str(e)}')
     
-    # 3. Validate MIME type against whitelist
     content_type = file.content_type or 'application/octet-stream'
     if not InputSanitizer.validate_mime_type(content_type):
         raise HTTPException(
             status_code=400, 
-            detail=f'MIME type {content_type} not allowed'
+            detail=f'Typ MIME {content_type} jest niedozwolony'
         )
     
-    # 4. Read file with size limit
     try:
         content = await file.read()
         if len(content) > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=413, 
-                detail=f'File too large (max 10 MB, received {len(content) / 1024 / 1024:.1f} MB)'
+                detail=f'Plik zbyt duży (max 10 MB, otrzymano {len(content) / 1024 / 1024:.1f} MB)'
             )
         if len(content) == 0:
-            raise HTTPException(status_code=400, detail='File is empty')
+            raise HTTPException(status_code=400, detail='Plik jest pusty')
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail='Failed to read file')
+        raise HTTPException(status_code=400, detail='Nie udało się odczytać pliku')
     
-    # 5. Create and store attachment
     try:
         attachment = Attachment(
             message_id=message_id,
             filename=sanitized_filename,
             mime_type=content_type,
-            ciphertext=content,  # In production: encrypt this
+            ciphertext=content, 
             size_bytes=len(content),
         )
         
@@ -437,7 +381,7 @@ async def upload_attachment(
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail='Failed to store attachment')
+        raise HTTPException(status_code=500, detail='Nie udało się przechować załącznika')
 
 
 @router.get('/inbox/{message_id}/attachments', response_model=List[AttachmentListItem])
@@ -446,16 +390,10 @@ def get_attachments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Etap 7: List attachments for a message with authorization check.
-    Returns file metadata without content.
-    """
-    # Verify message exists
     msg = db.query(Message).filter(Message.id == message_id).first()
     if not msg:
-        raise HTTPException(status_code=404, detail='Message not found')
+        raise HTTPException(status_code=404, detail='Wiadomość nie znaleziona')
     
-    # Check authorization: is current_user sender or recipient?
     is_sender = msg.sender_id == current_user.id
     
     is_recipient = db.query(MessageRecipient).filter(
@@ -465,9 +403,8 @@ def get_attachments(
     ).first() is not None
     
     if not (is_sender or is_recipient):
-        raise HTTPException(status_code=403, detail='Not authorized to view this message')
+        raise HTTPException(status_code=403, detail='Nie masz uprawnień do wyświetlenia tej wiadomości')
     
-    # Get all attachments
     attachments = db.query(Attachment).filter(
         Attachment.message_id == message_id
     ).all()
@@ -490,27 +427,20 @@ def download_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Etap 7: Download attachment with authorization and validation.
-    Returns encrypted content in base64 format.
-    """
-    # Get attachment
     attachment = db.query(Attachment).filter(
         Attachment.id == attachment_id
     ).first()
     
     if not attachment:
-        raise HTTPException(status_code=404, detail='Attachment not found')
+        raise HTTPException(status_code=404, detail='Załącznik nie znaleziony')
     
-    # Get associated message
     msg = db.query(Message).filter(
         Message.id == attachment.message_id
     ).first()
     
     if not msg:
-        raise HTTPException(status_code=404, detail='Associated message not found')
+        raise HTTPException(status_code=404, detail='Skojarzona wiadomość nie znaleziona')
     
-    # Check authorization: is current_user sender or recipient?
     is_sender = msg.sender_id == current_user.id
     
     is_recipient = db.query(MessageRecipient).filter(
@@ -520,9 +450,8 @@ def download_attachment(
     ).first() is not None
     
     if not (is_sender or is_recipient):
-        raise HTTPException(status_code=403, detail='Not authorized to access this attachment')
+        raise HTTPException(status_code=403, detail='Nie masz uprawnień do dostępu do tego załącznika')
     
-    # Return attachment in base64 format
     return AttachmentDownloadResponse(
         filename=attachment.filename,
         data_base64=base64.b64encode(attachment.ciphertext).decode('ascii'),

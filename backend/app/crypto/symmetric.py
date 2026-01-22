@@ -7,14 +7,14 @@ from typing import Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
-AESGCM_KEY_LEN = 32          # 256-bit
-AESGCM_NONCE_LEN = 12        # recommended for GCM
+AESGCM_KEY_LEN = 32        
+AESGCM_NONCE_LEN = 12       
 
 
 @dataclass(frozen=True)
 class AeadCiphertext:
     nonce: bytes
-    ciphertext: bytes  # includes GCM tag at the end
+    ciphertext: bytes 
 
 
 def generate_msg_key() -> bytes:
@@ -23,7 +23,7 @@ def generate_msg_key() -> bytes:
 
 def aead_encrypt(*, key: bytes, plaintext: bytes, aad: Optional[bytes] = None) -> AeadCiphertext:
     if len(key) != AESGCM_KEY_LEN:
-        raise ValueError('Invalid AESGCM key length')
+        raise ValueError('Nieprawidłowa długość klucza AESGCM')
     nonce = os.urandom(AESGCM_NONCE_LEN)
     aesgcm = AESGCM(key)
     ct = aesgcm.encrypt(nonce, plaintext, aad)
@@ -32,8 +32,8 @@ def aead_encrypt(*, key: bytes, plaintext: bytes, aad: Optional[bytes] = None) -
 
 def aead_decrypt(*, key: bytes, nonce: bytes, ciphertext: bytes, aad: Optional[bytes] = None) -> bytes:
     if len(key) != AESGCM_KEY_LEN:
-        raise ValueError('Invalid AESGCM key length')
+        raise ValueError('Nieprawidłowa długość klucza AESGCM')
     if len(nonce) != AESGCM_NONCE_LEN:
-        raise ValueError('Invalid AESGCM nonce length')
+        raise ValueError('Nieprawidłowa długość nonce AESGCM')
     aesgcm = AESGCM(key)
     return aesgcm.decrypt(nonce, ciphertext, aad)

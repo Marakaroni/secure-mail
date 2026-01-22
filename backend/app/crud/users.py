@@ -32,7 +32,6 @@ def create_user(db: Session, username: str, email: str, password: str) -> User:
 
     aad = email.encode("utf-8")
 
-    # Encrypt private keys: encrypt_aesgcm returns nonce+ciphertext blob
     enc_priv_sign = encrypt_aesgcm(kek, km.private_sign_key, aad=aad)
     enc_priv_enc = encrypt_aesgcm(kek, km.private_enc_key, aad=aad)
 

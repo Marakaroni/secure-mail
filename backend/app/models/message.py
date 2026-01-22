@@ -12,17 +12,13 @@ class Message(Base):
 
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
 
-    # Subject: plaintext, unencrypted metadata (not sensitive)
     subject: Mapped[str] = mapped_column(String(255), default="", nullable=False, index=True)
 
-    # Message encryption: ciphertext includes encrypted body + attachments together
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # AEAD nonce (12 bytes for GCM)
-    
-    # AAD (Associated Authenticated Data): metadata that's authenticated but not secret
+    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  
+
     aad: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    
-    # Digital signature over (nonce + ciphertext + aad) by sender
+
     signature: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

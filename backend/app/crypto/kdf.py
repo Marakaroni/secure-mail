@@ -7,7 +7,7 @@ from argon2.low_level import hash_secret_raw, Type
 @dataclass
 class Argon2Params:
     time_cost: int = 3
-    memory_cost: int = 64 * 1024  # KiB (64 MiB)
+    memory_cost: int = 64 * 1024 
     parallelism: int = 1
     hash_len: int = 32
     salt_len: int = 16
@@ -28,7 +28,7 @@ def new_salt(params: Argon2Params) -> bytes:
 
 def derive_key_from_password(password: str, salt: bytes, params: Argon2Params) -> bytes:
     if not isinstance(password, str) or not password:
-        raise ValueError("Password required")
+        raise ValueError("Hasło jest wymagane")
     return hash_secret_raw(
         secret=password.encode("utf-8"),
         salt=salt,
