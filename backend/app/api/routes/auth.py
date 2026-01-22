@@ -94,11 +94,13 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
             pass
 
     if getattr(u, "two_fa_enabled", False):
+        csrf_token = generate_csrf_token()
         mfa_token = create_access_token(subject=str(u.id), extra={"mfa_pending": True})
-        return TokenOut(requires_2fa=True, mfa_token=mfa_token)
+        return TokenOut(requires_2fa=True, mfa_token=mfa_token, csrf_token=csrf_token)
 
+    csrf_token = generate_csrf_token()
     access_token = create_access_token(subject=str(u.id), extra={"mfa": True})
-    return TokenOut(requires_2fa=False, access_token=access_token)
+    return TokenOut(requires_2fa=False, access_token=access_token, csrf_token=csrf_token)
 
 
 @router.post("/2fa/setup", response_model=TwoFASetupResponse)
@@ -130,12 +132,10 @@ def twofa_setup(
 @router.post("/2fa/enable")
 def twofa_enable(
     payload: TwoFAEnableRequest,
-    email: str = Body(...),
-    password: str = Body(...),
     db: Session = Depends(get_db),
 ):
     # Rate limiting
-    rate_limit_key = f"2fa_enable_{email}"
+    rate_limit_key = f"2fa_enable_{payload.email}"
     if is_rate_limited(rate_limit_key):
         delay = get_rate_limit_delay(rate_limit_key)
         raise HTTPException(
@@ -143,8 +143,8 @@ def twofa_enable(
             detail=f"Too many attempts. Try again in {int(delay)} seconds."
         )
 
-    u = get_user_by_email(db, email)
-    if not u or not verify_password(password, u.password_hash):
+    u = get_user_by_email(db, payload.email)
+    if not u or not verify_password(payload.password, u.password_hash):
         record_auth_attempt(rate_limit_key, success=False)
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
@@ -165,8 +165,6 @@ def twofa_enable(
     db.add(u)
     db.commit()
     return {"status": "ok"}
-
-
 @router.post("/2fa/verify", response_model=TokenOut)
 def twofa_verify(payload: TwoFAVerifyRequest, db: Session = Depends(get_db)):
     # Decode mfa_token to get user_id
@@ -217,3 +215,24 @@ def get_csrf_token():
     """
     token = generate_csrf_token()
     return {"csrf_token": token}
+
+
+@router.get("/me")
+def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current logged-in user info"""
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "two_fa_enabled": current_user.two_fa_enabled,
+    }
+
+
+@router.get("/users")
+def list_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get list of all registered users (except current user)"""
+    users = db.query(User).filter(User.id != current_user.id).all()
+    return [{"id": u.id, "username": u.username, "email": u.email} for u in users]

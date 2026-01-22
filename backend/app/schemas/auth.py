@@ -63,3 +63,4 @@ class TokenOut(BaseModel):
     requires_2fa: bool
     access_token: str | None = None
     mfa_token: str | None = None
+    csrf_token: str | None = None

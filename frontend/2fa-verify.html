@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weryfikacja 2FA - Bezpieczna Poczta</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Bezpieczna Poczta</h1>
+        <h2>Weryfikacja Dwuetapowa</h2>
+        
+        <p class="subtitle">Wpisz kod z Twojej aplikacji authenticatora</p>
+
+        <form id="verify2FAForm">
+            <div class="form-group">
+                <label for="totp">Kod TOTP (6 cyfr):</label>
+                <input type="text" id="totp" name="totp" required maxlength="6" pattern="[0-9]{6}" placeholder="000000" autofocus>
+            </div>
+
+            <button type="submit" class="btn-primary">Weryfikuj</button>
+            
+            <div id="errorMessage" class="error-message"></div>
+        </form>
+
+        <div class="form-link">
+            <a href="login.html">Wróć do logowania</a>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script>
+        // Initialize API and CSRF token
+        const api = new SecureMailAPI();
+        (async () => {
+            await api.initCSRF();
+        })();
+    </script>
+    <script src="2fa-verify.js"></script>
+</body>
+</html>

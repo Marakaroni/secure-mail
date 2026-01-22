@@ -5,6 +5,7 @@ import base64
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.db.session import get_db
 from app.models.user import User
@@ -35,18 +36,24 @@ def _resolve_recipients(db: Session, tokens: List[str]) -> List[User]:
     """
     tokens: lista 'recipients' z requestu (u Ciebie stringi).
     Wyszukujemy po email ALBO username (bo logowanie masz po emailu, a username wyświetlasz).
+    Case-insensitive matching.
     """
-    uniq = [t.strip() for t in tokens if t and t.strip()]
+    uniq = [t.strip().lower() for t in tokens if t and t.strip()]
+    
     if not uniq:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid recipients')
 
-    # email match
-    by_email = db.query(User).filter(User.email.in_(uniq)).all()
+    # email match (case-insensitive using func.lower)
+    by_email = db.query(User).filter(
+        func.lower(User.email).in_(uniq)
+    ).all()
 
-    # username match (jeśli masz kolumnę username)
+    # username match (case-insensitive)
     by_username = []
     if hasattr(User, 'username'):
-        by_username = db.query(User).filter(User.username.in_(uniq)).all()
+        by_username = db.query(User).filter(
+            func.lower(User.username).in_(uniq)
+        ).all()
 
     # połącz, bez duplikatów
     found_map = {}
@@ -54,8 +61,8 @@ def _resolve_recipients(db: Session, tokens: List[str]) -> List[User]:
         found_map[u.id] = u
 
     recipients = list(found_map.values())
+    
     if not recipients:
-        # nie zdradzamy czy użytkownicy istnieją; komunikat ogólny
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid recipients')
 
     return recipients
@@ -279,6 +286,11 @@ def get_message(
     # Extract subject from Message model (not AAD)
     subject = msg.subject
     
+    # Get attachments
+    attachments = db.query(Attachment).filter(
+        Attachment.message_id == msg.id
+    ).all()
+    
     return MessageReceiveResponse(
         id=msg.id,
         sender_username=sender.username,
@@ -289,6 +301,16 @@ def get_message(
         is_read=mr.is_read,
         is_deleted=mr.is_deleted,
         signature_valid=signature_valid,
+        attachments=[
+            {
+                'id': att.id,
+                'message_id': att.message_id,
+                'filename': att.filename,
+                'size_bytes': att.size_bytes,
+                'mime_type': att.mime_type,
+            }
+            for att in attachments
+        ],
     )
 
 
@@ -400,7 +422,7 @@ async def upload_attachment(
             filename=sanitized_filename,
             mime_type=content_type,
             ciphertext=content,  # In production: encrypt this
-            size=len(content),
+            size_bytes=len(content),
         )
         
         db.add(attachment)
@@ -411,7 +433,7 @@ async def upload_attachment(
             attachment_id=attachment.id,
             message_id=attachment.message_id,
             filename=attachment.filename,
-            size_bytes=attachment.size,
+            size_bytes=attachment.size_bytes,
         )
     except Exception as e:
         db.rollback()
@@ -455,7 +477,7 @@ def get_attachments(
             id=a.id,
             message_id=a.message_id,
             filename=a.filename,
-            size_bytes=a.size,
+            size_bytes=a.size_bytes,
             mime_type=a.mime_type,
         )
         for a in attachments

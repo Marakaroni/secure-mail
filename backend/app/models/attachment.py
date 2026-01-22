@@ -15,6 +15,6 @@ class Attachment(Base):
     mime_type: Mapped[str] = mapped_column(String(127), nullable=False)
 
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
 
     message = relationship("Message", back_populates="attachments")

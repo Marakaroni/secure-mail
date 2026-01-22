@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rejestracja - Bezpieczna Poczta</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Bezpieczna Poczta</h1>
+        <h2>Rejestracja</h2>
+        
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="username">Nazwa użytkownika:</label>
+                <input type="text" id="username" name="username" required minlength="3" placeholder="jan_nowak">
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required placeholder="twoj@email.com">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Hasło:</label>
+                <input type="password" id="password" name="password" required placeholder="••••••••">
+                <small>Musi zawierać: wielkie litery, małe litery, cyfrę, znak specjalny (!@#$%^&*)</small>
+            </div>
+
+            <button type="submit" class="btn-primary">Stwórz konto</button>
+            
+            <div id="errorMessage" class="error-message"></div>
+            <div id="successMessage" class="success-message"></div>
+        </form>
+
+        <div class="form-link">
+            Masz już konto? <a href="login.html">Zaloguj się</a>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script>
+        // Initialize API and CSRF token
+        const api = new SecureMailAPI();
+        (async () => {
+            await api.initCSRF();
+        })();
+    </script>
+    <script src="register.js"></script>
+</body>
+</html>

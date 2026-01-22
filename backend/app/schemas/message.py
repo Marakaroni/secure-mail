@@ -74,7 +74,7 @@ class MessageListItem(BaseModel):
 class MessageReceiveResponse(BaseModel):
     """
     Etap 6: Decrypted message for recipient.
-    Contains plaintext body + metadata.
+    Contains plaintext body + metadata + attachments.
     """
     model_config = ConfigDict(extra='forbid')
     
@@ -87,6 +87,7 @@ class MessageReceiveResponse(BaseModel):
     is_read: bool
     is_deleted: bool
     signature_valid: bool
+    attachments: List['AttachmentListItem'] = []
 
 
 class MessageUpdateResponse(BaseModel):

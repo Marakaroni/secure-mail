@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bezpieczna Poczta</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .landing {
+            text-align: center;
+        }
+
+        .landing h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .landing p {
+            font-size: 18px;
+            margin-bottom: 30px;
+            color: var(--gray-700);
+        }
+
+        .landing-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .landing-buttons a {
+            display: inline-block;
+            padding: 12px 24px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-register {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+        }
+
+        .btn-register:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-login {
+            background: var(--gray-300);
+            color: var(--gray-900);
+        }
+
+        .btn-login:hover {
+            background: var(--gray-500);
+            color: white;
+        }
+
+        .features {
+            margin-top: 40px;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.5);
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .features h3 {
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .features li {
+            padding: 8px 0;
+            color: var(--gray-700);
+        }
+
+        .features li:before {
+            content: "✓ ";
+            color: var(--success);
+            font-weight: bold;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container landing">
+        <h1>🔐 Bezpieczna Poczta</h1>
+        <p>Szyfrowana komunikacja e-mailowa z dwuetapową autentykacją</p>
+
+        <div class="landing-buttons">
+            <a href="register.html" class="btn-register">Zarejestruj się</a>
+            <a href="login.html" class="btn-login">Zaloguj się</a>
+        </div>
+
+        <div class="features">
+            <h3>Funkcje bezpieczeństwa:</h3>
+            <ul>
+                <li>Szyfrowanie end-to-end (RSA-4096 + AES-256-GCM)</li>
+                <li>Dwuetapowa autentykacja (TOTP)</li>
+                <li>Podpisy cyfrowe wiadomości</li>
+                <li>Bezpieczne zarządzanie kluczami</li>
+                <li>Ochrona przed atakami CSRF</li>
+                <li>Rate limiting na logowanie</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script>
+        // Initialize API and CSRF token
+        (async () => {
+            const api = new SecureMailAPI();
+            await api.initCSRF();
+
+            // If already logged in, redirect to inbox
+            if (api.isLoggedIn()) {
+                window.location.href = 'inbox.html';
+            }
+        })();
+    </script>
+</body>
+</html>

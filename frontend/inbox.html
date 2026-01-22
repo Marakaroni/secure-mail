@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skrzynka Odbiorcza - Bezpieczna Poczta</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="mail-layout">
+    <div class="mail-container">
+        <aside class="sidebar">
+            <div style="margin-bottom: 20px;">
+                <button class="sidebar-item active" data-page="inbox">📥 Odebrane</button>
+                <button class="sidebar-item" data-page="compose">✍️ Nowa wiadomość</button>
+                <button class="sidebar-item" data-page="logout">🚪 Wyloguj się</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="header">
+                <div class="header-left">
+                    <h1>📧 Bezpieczna Poczta</h1>
+                </div>
+                <div class="header-right">
+                    <div class="user-info" id="userInfo">Zalogowany...</div>
+                </div>
+            </div>
+
+            <div id="inboxView" style="display: none;">
+                <h2>Wiadomości</h2>
+                <ul id="messageList" class="message-list">
+                    <li style="padding: 20px; text-align: center; color: var(--gray-500);">Ładowanie wiadomości...</li>
+                </ul>
+            </div>
+
+            <div id="composeView" style="display: none;">
+                <h2>Nowa wiadomość</h2>
+                <form id="composeForm">
+                    <div class="form-group">
+                        <label for="toEmail">Do (email):</label>
+                        <input type="text" id="toEmail" name="toEmail" required placeholder="Wybierz lub wpisz email">
+                        <div id="recipientsList" style="position: absolute; background: white; border: 1px solid var(--gray-300); border-radius: 4px; max-height: 150px; overflow-y: auto; width: 95%; display: none; z-index: 10; margin-top: 2px;"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="subject">Temat:</label>
+                        <input type="text" id="subject" name="subject" required placeholder="Temat wiadomości">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="body">Treść:</label>
+                        <textarea id="body" name="body" required placeholder="Treść wiadomości"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="attachments">Załączniki:</label>
+                        <input type="file" id="attachments" name="attachments" multiple>
+                        <small>Możesz wybrać wiele plików</small>
+                        <div id="attachmentsList" style="margin-top: 10px;"></div>
+                    </div>
+
+                    <button type="submit" class="btn-primary">Wyślij</button>
+                    <div id="composeError" class="error-message"></div>
+                    <div id="composeSuccess" class="success-message"></div>
+                </form>
+            </div>
+
+            <div id="messageView" style="display: none;">
+                <div class="message-detail" id="messageDetail"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="api.js"></script>
+    <script>
+        // Initialize API and CSRF token
+        const api = new SecureMailAPI();
+        (async () => {
+            await api.initCSRF();
+        })();
+    </script>
+    <script src="inbox.js"></script>
+</body>
+</html>
