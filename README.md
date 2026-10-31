@@ -4,12 +4,14 @@ Szyfrowana aplikacja e-mail z dwuetapową autentykacją (2FA), hybrydowym szyfro
 
 ### Wymagania
 - Docker & Docker Compose
-- HTTPS (certyfikat selbyt-podpisany)
+- HTTPS (certyfikat samopodpisany)
 
 ## Uruchomienie
 
 ```bash
 cd secure-mail
+cp .env.example .env              # uzupełnij SECRET_KEY i JWT_SECRET
+# wygeneruj certyfikat TLS (sekcja „Certyfikat SSL”)
 docker compose up --build
 ```
 
@@ -69,12 +71,12 @@ secure-mail/
 
 ## Certyfikat SSL
 
-Certyfikat selbyt-podpisany jest już wygenerowany w `nginx/certs/`.
+Klucze TLS nie są przechowywane w repozytorium. Przed pierwszym uruchomieniem wygeneruj certyfikat samopodpisany:
 
-Aby wygenerować nowy:
 ```bash
-openssl req -x509 -newkey rsa:4096 -keyout nginx/certs/key.pem \
-  -out nginx/certs/cert.pem -days 365 -nodes
+mkdir -p nginx/certs
+openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+  -keyout nginx/certs/privkey.pem -out nginx/certs/fullchain.pem -subj "/CN=localhost"
 ```
 
 ## Wymagania Hasła

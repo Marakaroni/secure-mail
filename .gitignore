@@ -16,3 +16,7 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# klucze i certyfikaty TLS (generowane lokalnie)
+nginx/certs/*.pem
+*.key
